@@ -4,12 +4,15 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import logging
 import os
+import urllib
+import tempfile
 
 from django.conf import settings
 from django.template import loader, Context, RequestContext
 from django.http import HttpResponse
 from django.utils.http import urlquote
 from django.utils.six import BytesIO
+from django.contrib.staticfiles import finders
 
 import xhtml2pdf.default
 from xhtml2pdf import pisa
@@ -19,6 +22,7 @@ from .exceptions import UnsupportedMediaPathException, PDFRenderingError
 logger = logging.getLogger("app.pdf")
 logger_x2p = logging.getLogger("app.pdf.xhtml2pdf")
 
+tempdir = tempfile.mkdtemp()
 
 def fetch_resources(uri, rel):
     """
@@ -32,11 +36,25 @@ def fetch_resources(uri, rel):
     :raises: :exc:`~easy_pdf.exceptions.UnsupportedMediaPathException`
     """
     if settings.STATIC_URL and uri.startswith(settings.STATIC_URL):
-        path = os.path.join(settings.STATIC_ROOT, uri.replace(settings.STATIC_URL, ""))
+        if settings.STATIC_ROOT:
+            path = finders.find(uri.replace(settings.STATIC_URL, ""))
+        else:
+            path = os.path.join(tempdir, uri.replace(settings.STATIC_URL, ""))
+
+            if not os.path.isfile(path):
+                try:
+                    os.makedirs(os.path.dirname(path))
+                except OSError as e:
+                    if e.errno == 17:  # dir already exists
+                        pass
+                    else:
+                        raise
+
+                urllib.urlretrieve(uri, path)
     elif settings.MEDIA_URL and uri.startswith(settings.MEDIA_URL):
         path = os.path.join(settings.MEDIA_ROOT, uri.replace(settings.MEDIA_URL, ""))
     else:
-        path = os.path.join(settings.STATIC_ROOT, uri)
+        path = finders.find(uri)
 
     if not os.path.isfile(path):
         raise UnsupportedMediaPathException(
